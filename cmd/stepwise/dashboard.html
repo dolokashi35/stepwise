@@ -1,0 +1,191 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>stepwise</title>
+<style>
+  :root {
+    --bg: #f6f5f1; --panel: #ffffff; --ink: #1c1b18; --muted: #6f6c64; --line: #e3e0d8;
+    --ok: #1f7a4d; --ok-bg: #e3f3ea; --run: #1d5fd1; --run-bg: #e4edfc;
+    --warn: #9a5b00; --warn-bg: #fdefd3; --bad: #b3261e; --bad-bg: #fbe6e4; --idle-bg: #efede7;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #141412; --panel: #1d1d1a; --ink: #ecebe6; --muted: #9a978e; --line: #2e2d29;
+      --ok: #6fd3a0; --ok-bg: #16301f; --run: #8db4ff; --run-bg: #17243f;
+      --warn: #f0b95a; --warn-bg: #3a2a0c; --bad: #ff8e86; --bad-bg: #3d1614; --idle-bg: #262521;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.45 -apple-system, "Segoe UI", system-ui, sans-serif; }
+  main { max-width: 1120px; margin: 0 auto; padding: 24px 16px 64px; }
+  header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 16px; margin-bottom: 20px; }
+  h1 { font-size: 20px; margin: 0; letter-spacing: -0.01em; }
+  header p { margin: 0; color: var(--muted); }
+  h2 { font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); margin: 28px 0 10px; font-weight: 600; }
+  .controls { display: flex; flex-wrap: wrap; gap: 8px; }
+  button { font: inherit; padding: 7px 12px; border-radius: 7px; border: 1px solid var(--line); background: var(--panel); color: var(--ink); cursor: pointer; }
+  button:hover { border-color: var(--muted); }
+  button.primary { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+  button.danger { color: var(--bad); border-color: var(--bad); }
+  button.danger.on { background: var(--bad); color: var(--panel); }
+  button:disabled { opacity: 0.4; cursor: default; }
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+  .tile { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; }
+  .tile b { display: block; font-size: 24px; font-variant-numeric: tabular-nums; letter-spacing: -0.02em; }
+  .tile span { color: var(--muted); font-size: 12px; }
+  .tile.good b { color: var(--ok); }
+  .workers { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 10px; }
+  .worker { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+  .worker.dead { border-color: var(--bad); background: var(--bad-bg); }
+  .worker .id { font-family: var(--mono); font-weight: 600; }
+  .worker small { color: var(--muted); display: block; }
+  .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--ok); margin-right: 6px; }
+  .dead .dot { background: var(--bad); }
+  .list { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; overflow-x: auto; }
+  table { border-collapse: collapse; width: 100%; min-width: 760px; }
+  th, td { text-align: left; padding: 8px 12px; border-bottom: 1px solid var(--line); white-space: nowrap; vertical-align: middle; }
+  th { font-size: 12px; color: var(--muted); font-weight: 600; }
+  tr:last-child td { border-bottom: 0; }
+  td.mono { font-family: var(--mono); font-size: 13px; }
+  .pill { display: inline-block; padding: 3px 9px; border-radius: 999px; font-size: 12px; margin-right: 4px; background: var(--idle-bg); color: var(--muted); }
+  .pill.done { background: var(--ok-bg); color: var(--ok); }
+  .pill.running { background: var(--run-bg); color: var(--run); animation: pulse 1s ease-in-out infinite; }
+  .pill.stalled { background: var(--warn-bg); color: var(--warn); }
+  .pill.failed { background: var(--bad-bg); color: var(--bad); }
+  @keyframes pulse { 50% { opacity: 0.55; } }
+  @media (prefers-reduced-motion: reduce) { .pill.running { animation: none; } }
+  .status { font-weight: 600; }
+  .status.completed { color: var(--ok); } .status.failed { color: var(--bad); }
+  .status.running { color: var(--run); } .status.stalled { color: var(--warn); }
+  .empty { padding: 28px; text-align: center; color: var(--muted); }
+  .note { color: var(--muted); font-size: 12px; margin-top: 8px; }
+  #offline { display: none; background: var(--bad-bg); color: var(--bad); padding: 8px 12px; border-radius: 8px; margin-bottom: 12px; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>stepwise</h1>
+    <p>Durable workflow engine. Kill a worker mid-order and watch another one finish it.</p>
+  </header>
+  <div id="offline">Lost contact with the demo server.</div>
+
+  <div class="controls">
+    <button class="primary" onclick="start(1)">Start 1 order</button>
+    <button onclick="start(10)">Start 10</button>
+    <button onclick="start(1, {flaky_pct: 100})">Start a flaky order</button>
+    <button onclick="start(1, {fail_ship: true})">Start an order that cannot ship</button>
+    <button id="chaos" class="danger" onclick="toggleChaos()">Chaos: off</button>
+    <button onclick="post('/api/clear', {})">Clear finished</button>
+  </div>
+
+  <h2>Totals</h2>
+  <div class="tiles" id="tiles"></div>
+
+  <h2>Workers</h2>
+  <div class="workers" id="workers"></div>
+  <p class="note" id="leaseNote"></p>
+
+  <h2>Orders</h2>
+  <div class="list" id="list"></div>
+</main>
+
+<script>
+let state = null;
+
+async function post(path, body) {
+  await fetch(path, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)});
+  refresh();
+}
+function start(count, extra) { post('/api/start', Object.assign({count}, extra || {})); }
+function toggleChaos() { post('/api/chaos', {on: !(state && state.chaos)}); }
+function kill(slot) { post('/api/kill', {slot}); }
+
+const esc = s => String(s).replace(/[&<>"]/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'}[c]));
+const tile = (value, label, cls) => `<div class="tile ${cls || ''}"><b>${value}</b><span>${label}</span></div>`;
+
+function render(s) {
+  const c = s.counts, fx = s.effects;
+  document.getElementById('tiles').innerHTML =
+    tile(c.completed, 'orders completed') +
+    tile(c.running + c.pending + c.sleeping, 'in progress') +
+    tile(c.failed, 'cancelled and refunded') +
+    tile(s.kills, 'workers killed') +
+    tile(s.takeovers, 'orders rescued by another worker') +
+    tile(fx.duplicates_absorbed, 'repeated step runs made harmless') +
+    tile(fx.applied, 'effects applied, each exactly once', 'good');
+
+  const alive = new Set(s.workers.filter(w => w.alive).map(w => w.id));
+  document.getElementById('workers').innerHTML = s.workers.map(w => `
+    <div class="worker ${w.alive ? '' : 'dead'}">
+      <div><span class="dot"></span><span class="id">${esc(w.id)}</span>
+        <small>${w.alive ? `pid ${w.pid} · running ${w.running}` : 'killed · restarting'}</small></div>
+      <button class="danger" ${w.alive ? '' : 'disabled'} onclick="kill(${w.slot})">Kill -9</button>
+    </div>`).join('');
+  document.getElementById('leaseNote').textContent =
+    `A killed worker's orders are picked up by another worker once its ${s.lease}s lease runs out.`;
+
+  const chaos = document.getElementById('chaos');
+  chaos.textContent = 'Chaos: ' + (s.chaos ? 'on' : 'off');
+  chaos.classList.toggle('on', s.chaos);
+
+  if (!s.workflows.length) {
+    document.getElementById('list').innerHTML = '<div class="empty">No orders yet. Start one, then kill the worker that is running it.</div>';
+    return;
+  }
+  const rows = s.workflows.map(w => {
+    const stalled = w.status === 'running' && !alive.has(w.worker);
+    const planned = s.steps.slice();
+    const names = w.events.map(e => e.name);
+    for (const n of names) if (!planned.includes(n)) planned.push(n);
+    const failedAt = w.events.findIndex(e => e.error);
+    const pills = planned.map(name => {
+      const ev = w.events.find(e => e.name === name);
+      let cls = '', extra = '';
+      if (ev) {
+        cls = ev.error ? 'failed' : 'done';
+        if (ev.attempts > 1) extra = ` ×${ev.attempts}`;
+      } else if (w.status === 'running' && name === planned[names.length] && failedAt < 0) {
+        cls = stalled ? 'stalled' : 'running';
+      } else if (failedAt >= 0 && name !== 'refund_card') {
+        return '';
+      }
+      const title = ev ? `${ev.error ? esc(ev.error) + ' · ' : ''}saved by ${esc(ev.worker)}, ${ev.attempts} attempt(s)` : '';
+      return `<span class="pill ${cls}" title="${title}">${esc(name.replace('_', ' '))}${extra}</span>`;
+    }).join('');
+    let status = w.status, cls = w.status;
+    if (stalled) { status = `worker dead · retry in ${w.lease_left}s`; cls = 'stalled'; }
+    else if (w.status === 'failed') status = 'refunded';
+    const who = w.status === 'running' ? esc(w.worker || '') : '';
+    return `<tr>
+      <td class="mono">${esc(w.id)}</td>
+      <td>${pills}</td>
+      <td class="status ${cls}">${esc(status)}</td>
+      <td class="mono">${who}</td>
+      <td>${w.epoch > 1 ? w.epoch - 1 : ''}</td>
+      <td>${w.seconds}s</td>
+    </tr>`;
+  }).join('');
+  document.getElementById('list').innerHTML =
+    `<table><thead><tr><th>Order</th><th>Steps</th><th>Status</th><th>Worker</th><th>Rescues</th><th>Time</th></tr></thead><tbody>${rows}</tbody></table>`;
+}
+
+async function refresh() {
+  try {
+    const r = await fetch('/api/state');
+    if (!r.ok) throw new Error(r.status);
+    state = await r.json();
+    document.getElementById('offline').style.display = 'none';
+    render(state);
+  } catch (e) {
+    document.getElementById('offline').style.display = 'block';
+  }
+}
+refresh();
+setInterval(refresh, 400);
+</script>
+</body>
+</html>
